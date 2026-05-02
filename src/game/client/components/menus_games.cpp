@@ -1361,6 +1361,7 @@ void CMenus::RenderSettingsBestClientFun(CUIRect MainView)
 			bool m_WhiteTurn = true;
 			bool m_GameOver = false;
 			bool m_WhiteWon = false;
+			bool m_Stalemate = false;
 			int m_SelectedX = -1;
 			int m_SelectedY = -1;
 			bool m_Dragging = false;
@@ -1399,6 +1400,7 @@ void CMenus::RenderSettingsBestClientFun(CUIRect MainView)
 			s_Chess.m_WhiteTurn = true;
 			s_Chess.m_GameOver = false;
 			s_Chess.m_WhiteWon = false;
+			s_Chess.m_Stalemate = false;
 			s_Chess.m_SelectedX = -1;
 			s_Chess.m_SelectedY = -1;
 			s_Chess.m_Dragging = false;
@@ -1528,10 +1530,8 @@ void CMenus::RenderSettingsBestClientFun(CUIRect MainView)
 		};
 
 		// Todo
-		// 1. check
-		// 2. checkmate/stalemate
-		// 3. castling
-		// 4. en passant
+		// 1. castling
+		// 2. en passant
 		auto IsValidMoveOnBoard = [&](const auto &Board, int FromX, int FromY, int ToX, int ToY) {
 			if(FromX == ToX && FromY == ToY)
 				return false;
@@ -1590,6 +1590,52 @@ void CMenus::RenderSettingsBestClientFun(CUIRect MainView)
 			if(IsCheckOnBoard(TempBoard, IsWhitePiece(Piece)))
 				return false;
 			
+				return true;
+			};
+
+		auto IsCheckmateOnBoard = [&](const auto &Board, bool WhiteTurn) {
+			if(!IsCheckOnBoard(Board, WhiteTurn))
+				return false;
+			for(int y = 0; y < 8; ++y)
+			{
+				for(int x = 0; x < 8; ++x)
+				{
+					const char Piece = Board[y][x];
+					if(Piece == '.' || IsWhitePiece(Piece) != WhiteTurn)
+						continue;
+					for(int ty = 0; ty < 8; ++ty)
+					{
+						for(int tx = 0; tx < 8; ++tx)
+						{
+							if(IsValidMoveOnBoard(Board, x, y, tx, ty))
+								return false;
+						}
+					}
+				}
+			}
+			return true;
+		};
+
+		auto IsStalemateOnBoard = [&](const auto &Board, bool WhiteTurn) {
+			if(IsCheckOnBoard(Board, WhiteTurn))
+				return false;
+			for(int y = 0; y < 8; ++y)
+			{
+				for(int x = 0; x < 8; ++x)
+				{
+					const char Piece = Board[y][x];
+					if(Piece == '.' || IsWhitePiece(Piece) != WhiteTurn)
+						continue;
+					for(int ty = 0; ty < 8; ++ty)
+					{
+						for(int tx = 0; tx < 8; ++tx)
+						{
+							if(IsValidMoveOnBoard(Board, x, y, tx, ty))
+								return false;
+						}
+					}
+				}
+			}
 			return true;
 		};
 
@@ -1747,12 +1793,20 @@ void CMenus::RenderSettingsBestClientFun(CUIRect MainView)
 			s_Chess.m_AnimToX = Move.m_ToX;
 			s_Chess.m_AnimToY = Move.m_ToY;
 			s_Chess.m_AnimStart = AnimTime;
-			if(CapturedPiece == 'k' || CapturedPiece == 'K')
+			s_Chess.m_WhiteTurn = !s_Chess.m_WhiteTurn;
+
+			if(IsCheckmateOnBoard(s_Chess.m_aBoard, s_Chess.m_WhiteTurn))
 			{
 				s_Chess.m_GameOver = true;
-				s_Chess.m_WhiteWon = IsWhitePiece(MovingPiece);
+				s_Chess.m_WhiteWon = !s_Chess.m_WhiteTurn;
+				s_Chess.m_Stalemate = false;
 			}
-			s_Chess.m_WhiteTurn = !s_Chess.m_WhiteTurn;
+			else if(IsStalemateOnBoard(s_Chess.m_aBoard, s_Chess.m_WhiteTurn))
+			{
+				s_Chess.m_GameOver = true;
+				s_Chess.m_WhiteWon = false;
+				s_Chess.m_Stalemate = true;
+			}
 		};
 
 		if(!s_Chess.m_InGame)
@@ -1792,7 +1846,18 @@ void CMenus::RenderSettingsBestClientFun(CUIRect MainView)
 			BtnArea.VSplitRight(110.0f, &BtnArea, &RestartButton);
 			SetupButton.VSplitLeft(10.0f, nullptr, &SetupButton);
 
-			const char *pStatus = s_Chess.m_GameOver ? (s_Chess.m_WhiteWon ? TCLocalize("Winner: White") : TCLocalize("Winner: Black")) : (s_Chess.m_WhiteTurn ? TCLocalize("Turn: White") : TCLocalize("Turn: Black"));
+			const char *pStatus;
+			if(s_Chess.m_GameOver)
+			{
+				if(s_Chess.m_Stalemate)
+					pStatus = TCLocalize("Draw - Stalemate");
+				else
+					pStatus = s_Chess.m_WhiteWon ? TCLocalize("Winner: White") : TCLocalize("Winner: Black");
+			}
+			else
+			{
+				pStatus = s_Chess.m_WhiteTurn ? TCLocalize("Turn: White") : TCLocalize("Turn: Black");
+			}
 			Ui()->DoLabel(&TurnLabel, pStatus, FONT_SIZE, TEXTALIGN_ML);
 			if(DoButton_Menu(&s_ChessRestartButton, TCLocalize("Restart"), 0, &RestartButton))
 				ResetChess();
@@ -1829,7 +1894,16 @@ void CMenus::RenderSettingsBestClientFun(CUIRect MainView)
 					if(!PickBotMove(BotMove))
 					{
 						s_Chess.m_GameOver = true;
-						s_Chess.m_WhiteWon = true;
+						if(IsCheckOnBoard(s_Chess.m_aBoard, s_Chess.m_WhiteTurn))
+						{
+							s_Chess.m_WhiteWon = true;
+							s_Chess.m_Stalemate = false;
+						}
+						else
+						{
+							s_Chess.m_WhiteWon = false;
+							s_Chess.m_Stalemate = true;
+						}
 					}
 					else
 					{
@@ -1967,7 +2041,8 @@ void CMenus::RenderSettingsBestClientFun(CUIRect MainView)
 			{
 				CUIRect Overlay = Board;
 				Overlay.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.32f), IGraphics::CORNER_ALL, 4.0f);
-				Ui()->DoLabel(&Overlay, s_Chess.m_WhiteWon ? TCLocalize("White Wins") : TCLocalize("Black Wins"), HEADLINE_FONT_SIZE, TEXTALIGN_MC);
+				const char *pResult = s_Chess.m_Stalemate ? TCLocalize("Draw - Stalemate") : (s_Chess.m_WhiteWon ? TCLocalize("White Wins") : TCLocalize("Black Wins"));
+				Ui()->DoLabel(&Overlay, pResult, HEADLINE_FONT_SIZE, TEXTALIGN_MC);
 			}
 		}
 	}
